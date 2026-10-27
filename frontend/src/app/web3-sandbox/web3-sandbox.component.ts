@@ -1,14 +1,7 @@
 import { Component, ChangeDetectorRef, inject, OnInit, OnDestroy, AfterViewInit, ViewChild, ElementRef, ChangeDetectionStrategy } from '@angular/core'
 import { KeysService } from '../Services/keys.service'
 import { SnackBarHelperService } from '../Services/snack-bar-helper.service'
-import { getDefaultProvider, ethers } from 'ethers'
-import {
-  createClient,
-  connect,
-  disconnect,
-  getAccount,
-  InjectedConnector
-} from '@wagmi/core'
+import { ethers } from 'ethers'
 import {
   solidityCompiler
 } from 'solidity-browser-compiler'
@@ -23,11 +16,6 @@ import { EditorState } from '@codemirror/state'
 import { getLanguageExtension } from '../shared/codemirror-extensions'
 import { juiceShopTheme } from '../shared/codemirror-theme'
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const client = createClient({
-  autoConnect: true,
-  provider: getDefaultProvider()
-})
 const { ethereum } = window
 const compilerReleases = {
   '0.8.21': 'soljson-v0.8.21+commit.d9974bed.js',
@@ -154,8 +142,8 @@ contract HelloWorld {
         return
       }
 
-      const provider = new ethers.providers.Web3Provider(window.ethereum)
-      const signer = provider.getSigner()
+      const provider = new ethers.BrowserProvider(window.ethereum)
+      const signer = await provider.getSigner()
 
       const contractBytecode = selectedContract.evm.bytecode.object
       const contractAbi = selectedContract.abi
@@ -165,16 +153,16 @@ contract HelloWorld {
         contractBytecode,
         signer
       )
-      const transactionOptions: ethers.PayableOverrides = {}
+      const transactionOptions: ethers.Overrides = {}
       if (this.commonGweiValue > 0) {
-        transactionOptions.value = ethers.utils.parseUnits(
+        transactionOptions.value = ethers.parseUnits(
           this.commonGweiValue.toString(),
           'gwei'
         )
       }
       const contract = await factory.deploy(transactionOptions)
-      await contract.deployed()
-      this.deployedContractAddress = contract.address
+      await contract.waitForDeployment()
+      this.deployedContractAddress = await contract.getAddress()
 
       this.contractFunctions = contractAbi
         .filter((item) => item.type === 'function')
@@ -218,8 +206,8 @@ contract HelloWorld {
       const selectedContract =
         this.compiledContracts[this.selectedContractName]
 
-      const provider = new ethers.providers.Web3Provider(window.ethereum)
-      const signer = provider.getSigner()
+      const provider = new ethers.BrowserProvider(window.ethereum)
+      const signer = await provider.getSigner()
       const contract = new ethers.Contract(
         this.deployedContractAddress,
         selectedContract.abi,
@@ -233,14 +221,14 @@ contract HelloWorld {
             return this.parseInputValue(value.trim(), inputType)
           })
           : []
-      const transactionOptions: ethers.PayableOverrides = {}
+      const transactionOptions: ethers.Overrides = {}
       if (this.commonGweiValue > 0) {
-        transactionOptions.value = ethers.utils.parseUnits(
+        transactionOptions.value = ethers.parseUnits(
           this.commonGweiValue.toString(),
           'gwei'
         )
       }
-      const transaction = await contract.functions[func.name](
+      const transaction = await contract.getFunction(func.name)(
         ...inputs,
         transactionOptions
       )
@@ -251,7 +239,7 @@ contract HelloWorld {
         (func.stateMutability === 'view' || func.stateMutability === 'pure')
       ) {
         console.log('hello')
-        const outputValue = transaction[0].toString()
+        const outputValue = (func.outputs.length === 1 ? transaction : transaction[0]).toString()
         const updatedFunc = this.contractFunctions.find(
           (f) => f.name === func.name
         )
@@ -286,17 +274,17 @@ contract HelloWorld {
 
   async handleAuth () {
     try {
-      const { isConnected } = getAccount()
-
-      if (isConnected) {
-        await disconnect()
-      }
       if (!window.ethereum) {
         this.snackBarHelperService.open('PLEASE_INSTALL_WEB3_WALLET', 'errorBar')
         return
       }
 
-      const provider = await connect({ connector: new InjectedConnector() })
+      const browserProvider = new ethers.BrowserProvider(window.ethereum)
+      const accounts: string[] = await browserProvider.send('eth_requestAccounts', [])
+      const provider = {
+        account: accounts[0],
+        chain: { id: Number(await browserProvider.send('eth_chainId', [])) }
+      }
       this.metamaskAddress = provider.account
       this.userData = {
         address: provider.account,
